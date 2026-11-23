@@ -3091,6 +3091,7 @@ window.SAILOR_API_URL = 'https://script.google.com/macros/s/AKfycbxNbl1HX8r3zZSx
       + '<div class="field"><label for="mmBulk">บรรทัดละ 1 คน รูปแบบ: ชื่อตัวละคร, อาชีพ</label>'
       + '<textarea id="mmBulk" rows="6" placeholder="Luna, Priest"></textarea></div>'
       + '<button class="btn sm" type="button" data-a="mem-bulk">เพิ่มทั้งหมด</button></div></details>'
+      + syncCardHtml()
       + pinCardHtml(active)
       + '<div class="ad-card"><h3>สมาชิกที่ใช้งานอยู่ ('+active.length+')</h3>'
       + (rows||'<div class="empty" style="padding:12px">ยังไม่มีสมาชิก เพิ่มด้านบนได้เลย</div>')+'</div>'
@@ -3106,6 +3107,63 @@ window.SAILOR_API_URL = 'https://script.google.com/macros/s/AKfycbxNbl1HX8r3zZSx
       var name=document.getElementById('mmName').value.trim(), job=document.getElementById('mmJob').value.trim();
       if(!name){ notice(false,'กรุณากรอกชื่อตัวละคร'); return; }
       call('adminAddMembers',[[{name:name,job:job}]],memAfter);
+    });
+  }
+
+  /* ===== ซิงก์รายชื่อจาก Excel: วางรายชื่อล่าสุด -> ดูตัวอย่าง -> คัดคนที่ไม่อยู่ในรายชื่อออกให้ทีเดียว ===== */
+  var SYNC = {items:[]};
+  function syncCardHtml(){
+    return '<details class="ad-card"><summary><b>📊 ซิงก์รายชื่อจาก Excel (คัดคนออกทีเดียว)</b></summary><div style="margin-top:12px">'
+      +'<p class="gp-desc">เปิดไฟล์ Excel ของกิลด์ ลากคลุม <b>คอลัมน์ชื่อตัวละคร</b> (จะลากคอลัมน์อาชีพติดมาด้วยก็ได้) กดคัดลอก แล้ววางในช่องนี้ · ระบบจะเทียบกับรายชื่อในระบบ คนที่ไม่อยู่ในไฟล์จะถูกเสนอให้ออกจากกิลด์ <b>โดยยังไม่ทำอะไรจนกว่าจะกดยืนยัน</b> และประวัติเข้ากิจกรรมของคนที่ออกยังอยู่ครบ</p>'
+      +'<div class="field"><label for="syncTxt">วางรายชื่อล่าสุดจาก Excel (1 คนต่อ 1 บรรทัด)</label><textarea id="syncTxt" rows="7" placeholder="Luna&#9;Priest"></textarea></div>'
+      +'<div class="btnrow"><button type="button" class="btn sm" data-a="mem-sync-prev">ตรวจสอบ / ดูตัวอย่าง</button></div>'
+      +'<div id="syncOut"></div></div></details>';
+  }
+  function syncParse(text){
+    var out=[], seen={};
+    text.split(String.fromCharCode(10)).forEach(function(line){
+      line=line.replace(String.fromCharCode(13),'');
+      var cells=line.split(String.fromCharCode(9)), c=cells[0].trim().replace(/^"|"$/g,'');
+      if(cells.length===1){ var k=line.indexOf(','); if(k>0){ c=line.slice(0,k).trim(); cells=[c,line.slice(k+1)]; } }
+      if(!c || seen[c.toLowerCase()]) return; seen[c.toLowerCase()]=1;
+      out.push({name:c, job:(cells[1]||'').trim().replace(/^"|"$/g,'')});
+    });
+    return out;
+  }
+  function syncList(title,cls,arr,withBox,fmt){
+    if(!arr.length) return '';
+    return '<div class="ad-card" style="margin:10px 0 0;padding:12px"><b>'+title+' ('+arr.length+')</b><div style="max-height:260px;overflow:auto;margin-top:8px">'
+      +arr.map(function(x){ return '<label class="row" style="display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer">'+(withBox?'<input type="checkbox" checked data-sk="'+esc(x.name)+'">':'')+'<span>'+esc(x.name)+(x.job?' <small>('+esc(x.job)+')</small>':'')+(fmt?fmt(x):'')+'</span></label>'; }).join('')
+      +'</div></div>';
+  }
+  function syncPreview(){
+    var items=syncParse(document.getElementById('syncTxt').value);
+    if(items.length<5){ notice(false,'พบรายชื่อเพียง '+items.length+' คน กรุณาวางรายชื่อให้ครบ'); return; }
+    SYNC.items=items;
+    call('adminSyncMembers',[items,false,{}],function(r){
+      var o=document.getElementById('syncOut');
+      if(!r.ok){ o.innerHTML='<div class="msg bad">'+esc(r.message)+'</div>'; return; }
+      SYNC.res=r;
+      o.innerHTML='<div class="meta" style="margin:10px 0">ในไฟล์ '+r.listCount+' คน · ในระบบตอนนี้ '+r.active+' คน · อยู่ต่อ '+r.keep+' คน</div>'
+        +syncList('🚪 จะถูกคัดออกจากกิลด์ (เอาติ๊กออกถ้าต้องการให้คนนั้นอยู่ต่อ)','',r.remove,true)
+        +syncList('➕ ชื่อใหม่ที่ยังไม่มีในระบบ','',r.add,false,function(x){ return x.similar?' <b style="color:#c0392b">⚠ คล้ายกับ "'+esc(x.similar)+'" (ที่จะถูกคัดออก) ตรวจว่าพิมพ์ชื่อไม่ตรงกันหรือเปล่า</b>':''; })
+        +syncList('↩️ กลับเข้ากิลด์ (เคยออกไปแล้ว แต่อยู่ในไฟล์)','',r.reactivate,false)
+        +(r.remove.length||r.add.length||r.reactivate.length
+          ? '<div class="field" style="margin-top:10px"><label><input type="checkbox" id="syncAdd" checked> เพิ่มชื่อใหม่ '+r.add.length+' คนเข้าระบบด้วย</label></div>'
+            +'<div class="field" id="syncCfWrap" style="display:'+(r.active>=10&&r.remove.length*2>r.active?'':'none')+'"><label for="syncCf">คัดออกเกินครึ่ง พิมพ์คำว่า ยืนยัน</label><input id="syncCf" autocomplete="off"></div>'
+            +'<div class="btnrow"><button type="button" class="btn sm" data-a="mem-sync-do">ดำเนินการตามนี้</button></div>'
+          : '<div class="msg ok">รายชื่อในระบบตรงกับไฟล์แล้ว ไม่มีอะไรต้องแก้</div>');
+    });
+  }
+  function syncApply(b){
+    var keep=[]; Array.prototype.forEach.call(document.querySelectorAll('#syncOut input[data-sk]'), function(x){ if(!x.checked) keep.push(x.getAttribute('data-sk')); });
+    var cf=document.getElementById('syncCf'), add=document.getElementById('syncAdd');
+    var nRemove=SYNC.res.remove.length-keep.length;
+    twoStep(b,function(){
+      call('adminSyncMembers',[SYNC.items,true,{keep:keep,addNew:!!(add&&add.checked),confirm:cf?cf.value.trim():''}],function(r){
+        if(r.needConfirm){ var w=document.getElementById('syncCfWrap'); if(w) w.style.display=''; b.disabled=false; delete b.dataset.armed; b.textContent=b.dataset.label||'ดำเนินการตามนี้'; notice(false,r.message); return; }
+        SYNC.items=[]; memAfter(r);
+      });
     });
   }
 
@@ -3135,6 +3193,8 @@ window.SAILOR_API_URL = 'https://script.google.com/macros/s/AKfycbxNbl1HX8r3zZSx
       });
       if(!names.length){ notice(false,'ไม่มีรายชื่อที่แสดงอยู่'); return; }
       call('adminSetDiscord',[names,want],function(r){ if(r.ok){ var set={}; names.forEach(function(n){ set[n]=true; }); MEM.forEach(function(m){ if(set[m.name]) m.discord=want; }); } memAfter(r); });
+    } else if(a==='mem-sync-prev'){ syncPreview();
+    } else if(a==='mem-sync-do'){ syncApply(b);
     } else if(a==='cls-save'){
       call('adminSaveClass',[document.getElementById('clsName').value,document.getElementById('clsColor').value,document.getElementById('clsIcon').value],memAfter);
     } else if(a==='cls-edit'){
